@@ -180,7 +180,35 @@ def int_outputs(src, body, cols):
         found[nm] = k
     return {nm for nm, k in found.items() if k == {'int'}} or {nm for nm, k in found.items() if 'int' in k}
 
-def fs_uint(src):
+def fs_float(src):
+    """Keep unsigned colour declarations as bit-writer facts, not a permanent Metal attachment type. A shader can write the same register bits to float and unsigned targets.
+    Its original output struct and all computations stay unsigned; only main0's return reinterprets those colours as float. fs_uint gets the declared names so it always restores
+    unsigned and mixed entry points, even when the body does not look like an inferred integer writer. Signed colour declarations are left as before."""
+    st = re.search(r'\bstruct main0_out\s*\{(.*?)\};', src, re.S)
+    if not st: return src, set()
+    mem = re.findall(r'^\s*(\w+)\s+(\w+)\s*(\[\[[^\]]*\]\])?;', st[1], re.M)
+    cols = {nm: ty for ty, nm, at in mem if 'color(' in at}
+    uints = {nm: ty for nm, ty in cols.items() if re.fullmatch(r'uint[234]?', ty)}
+    if not uints or any(re.fullmatch(r'int[234]?', ty) for ty in cols.values()): return src, set()
+    if re.sub(r'^\s*\w+\s+\w+\s*(\[\[[^\]]*\]\])?;', '', st[1], flags=re.M).strip(): raise ValueError('unsigned colour outputs with an unknown member declaration')
+    try: e = dmsh_side.entry(src, 'main0')
+    except ValueError as x: raise ValueError(f'unsigned colour outputs: {x}') from x
+    if not e or e['ret'] != 'main0_out': raise ValueError('unsigned colour outputs without main0_out main0')
+    body = src[e['head']:e['end']]
+    returns = list(re.finditer(r'\breturn\s+([^;]+);', body))
+    if not returns or any(m[1].strip() != 'out' for m in returns): raise ValueError('unsigned colour outputs with an unknown return')
+    raw = 'dm_uint_main0_out'
+    if re.search(r'\b' + raw + r'\b', src): raise ValueError('unsigned output struct name already used')
+    # Rename every reference too: helper functions may take the output by reference, and the body may read or update its unsigned members.
+    rename = lambda s: re.sub(r'\bmain0_out\b', raw, s)
+    members = ''.join(f'    {ty.replace("uint", "float") if nm in uints else ty} {nm} {at};\n' for ty, nm, at in mem)
+    out = 'struct main0_out\n{\n' + members + '};\n\n'
+    conv = 'return main0_out{' + ', '.join(f'as_type<{ty.replace("uint", "float")}>(out.{nm})' if nm in uints else f'out.{nm}' for ty, nm, _ in mem) + '};'
+    body = re.sub(r'\breturn\s+out\s*;', lambda _: conv, rename(body))
+    return rename(src[:e['start']]) + out + src[e['start']:e['head']] + body + rename(src[e['end']:]), set(uints)
+
+
+def fs_uint(src, declared_uint=()):
     """Integer colour targets. With no PC version the translator declares every fragment output float; a shader writes an integer as the float with its bits (as_type<float>(…)), and Metal
     refuses a pipeline whose float output meets an integer attachment. Luigi's Mansion 3 draws its whole scene into an R32Uint + RGBA8Uint G-buffer (1,377 of its 4,307 pixel shaders write
     an output from integer bits): a hand-written row per shader (shader_facts_manual.tsv) does not scale to that. A pixel shader that writes an output from integer bits gets a second entry
@@ -206,7 +234,7 @@ def fs_uint(src):
         i = re.fullmatch(r'in\.(\w+)(?:\.\w+)?', d[1] if d else w)
         return bool(i and i[1] in flat)
     body = src[m.start():]; body = body[:body.find('return out;') + 1 or len(body)]
-    ints = int_outputs(src, body, cols)
+    ints = (set(declared_uint) & set(cols)) or int_outputs(src, body, cols)   # preserve the declared mixed signature, even when a declared float also looks like an integer writer
     if not from_int and not ints and not (writes and (all(re.fullmatch(r'-?[0-9.]+f?|float\d\([-0-9., ]*\)', w.strip()) for w in writes) or all(passed(w) for w in writes))): return None, 0
     uty = lambda ty: 'u' + ty.replace('float', 'int')   # float4 → uint4, float → uint
     try: e = dmsh_side.entry(src, 'main0')

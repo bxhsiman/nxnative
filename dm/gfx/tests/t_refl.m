@@ -23,6 +23,30 @@ static NSDictionary *load(const char *key) {
 
 int main(void) { @autoreleasepool {
     nvn_refl r; char err[160] = "";
+    {   // A readable-tile entry has fixed output types, even when ordinary entries cover float, uint and mixed targets.
+        NSDictionary *j = @{@"route": @"B", @"stage": @"ps", @"bindings": @[], @"fetch": @{@"outputs": @[
+            @{@"color": @0, @"type": @"uint4"}, @{@"color": @3, @"type": @"float4"}]}};
+        check("fetch outputs: conversion succeeds", 0, nvn_refl_from_json(j, &r, err, sizeof err));
+        check("fetch outputs: unsigned kind", 1, r.fo_kind[0]);
+        check("fetch outputs: float kind", 0, r.fo_kind[1]);
+        int8_t kinds[8]; uint8_t map[8]; memset(kinds, -1, sizeof kinds); memset(map, 0xff, sizeof map);
+        kinds[1] = 1; map[1] = 0; kinds[4] = 0; map[4] = 3;
+        check("fetch outputs: remapped mixed targets match", 1, nvn_fetch_outputs_match(&r, kinds, map));
+        kinds[1] = 0;
+        check("fetch outputs: uint cannot write a float target", 0, nvn_fetch_outputs_match(&r, kinds, map));
+        kinds[1] = 1; kinds[4] = 1;
+        check("fetch outputs: float cannot write a uint target", 0, nvn_fetch_outputs_match(&r, kinds, map));
+        map[4] = 0xff;
+        check("fetch outputs: disabled mapping is ignored", 1, nvn_fetch_outputs_match(&r, kinds, map));
+        kinds[1] = 2;
+        check("fetch outputs: uint cannot write a signed target", 0, nvn_fetch_outputs_match(&r, kinds, map));
+        r.fo_kind[0] = 2;
+        check("fetch outputs: signed target matches signed output", 1, nvn_fetch_outputs_match(&r, kinds, map));
+        kinds[1] = -1;
+        check("fetch outputs: absent attachment is ignored", 1, nvn_fetch_outputs_match(&r, kinds, map));
+        NSDictionary *bad = @{@"route": @"B", @"stage": @"ps", @"bindings": @[], @"fetch": @{@"outputs": @[@{@"color": @8, @"type": @"float4"}]}};
+        check("fetch outputs: invalid colour is refused", 1, nvn_refl_from_json(bad, &r, err, sizeof err) != 0);
+    }
     {   // native image atomics (dmsh_atomic.py): one read_write image, marked atomic by the build; an image the shader only stores to is not
         NSDictionary *j = @{@"route": @"B", @"bindings": @[
             @{@"kind": @"img", @"reg": @2, @"arg_id": @0, @"msl_name": @"cp_i_cb2_4C_r32ui", @"msl_type": @"texture_buffer<uint, access::read_write>", @"atomic": @YES},

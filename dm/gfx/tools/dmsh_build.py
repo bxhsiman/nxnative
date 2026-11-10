@@ -794,11 +794,18 @@ def finish(key, w, j, c1):
         plain = full
         full, lay = dmsh_entry.vs_layer_entry(full)   # layer entry points for a slice-writing geometry shader (see vs_layer_entry)
         open(msl, 'w').write(full)
-    fu, fmask = dmsh_entry.fs_uint(src) if j['stage'] == 'ps' else (None, 0)   # the integer-output entry points (see fs_uint); the analysis below uses the source with only main0
+    declared_uint = set()
+    if j['stage'] == 'ps':
+        try: src, declared_uint = dmsh_entry.fs_float(src)
+        except ValueError as e: return 'fragment output type failed', str(e)[:160], None
+        if declared_uint: open(msl, 'w').write(src)
+    fu, fmask = dmsh_entry.fs_uint(src, declared_uint) if j['stage'] == 'ps' else (None, 0)   # the integer-output entry points (see fs_uint); the analysis below uses the source with only main0
     fd = dmsh_entry.fs_dual(src) if j['stage'] == 'ps' and key in DUAL_WANT else None   # the dual-source entry point (see fs_dual), from the source with only main0
     shared = dmsh_side.shared_body(src) if fu or fd else None   # they call main0's body; fs_uint and fs_dual give none for a main0 whose shape it does not know
     if shared: plain = src; open(msl, 'w').write(shared + (fu or '') + (fd or ''))
-    else: fu = fd = None
+    else:
+        if declared_uint: return 'fragment output type failed', 'unsigned outputs need the shared body and integer entry points', None
+        fu = fd = None
     try: binds = dmsh_reflect.reflect(key, mesh['kind'] if mesh else j['stage'], src, res)   # before the compile: a pixel shader's readable-tile version needs its texture slots (ps_libraries)
     except ValueError as e: return 'reflection failed', str(e)[:160], None
     side, lost = {}, []
@@ -808,6 +815,7 @@ def finish(key, w, j, c1):
         if 'ios' in TARGETS and IOSOUT: MTL.compile('ios', msl, os.path.join(IOSOUT, key + '_b.metallib'))
     try: compile_targets()
     except subprocess.CalledProcessError as e:
+        if declared_uint: return 'fragment output type failed', str(e)[:160], None   # these integer entries preserve declared outputs, not optional guesses
         if not lay and not fu and not fd: return 'metal failed', str(e)[:160], None
         lost = [name for name, extra in (('layer', lay), ('integer output', fu), ('dual source', fd)) if extra]   # kept in the reflection, as a cache hit compiles nothing: every build reports it (shader_regressions.report_losses)
         open(msl, 'w').write(plain); lay = fu = fd = None   # the layer, integer-output and dual-source entry points are extras: a library that does not build with them is built without

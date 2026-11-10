@@ -184,7 +184,13 @@ int nvn_refl_from_json(NSDictionary *j, nvn_refl *o, char *err, int errlen) {
                 if ([c[@"proj"] intValue]) o->fc_proj |= 1u << i;
                 o->fc_reg[o->nfc] = (uint8_t)r; o->fc_locn[o->nfc] = (uint8_t)l; o->nfc++; }
             for (NSNumber *r in fe[@"mixed_regs"]) if (r.intValue >= 0 && r.intValue < 256) o->fc_mixed[r.intValue >> 6] |= 1ull << (r.intValue & 63);
-            for (NSDictionary *u in fe[@"outputs"]) { if (o->nfo >= 4) FAIL("more than 4 fetch outputs"); o->fo_color[o->nfo++] = (uint8_t)[u[@"color"] intValue]; }
+            for (NSDictionary *u in fe[@"outputs"]) {
+                if (o->nfo >= 4) FAIL("more than 4 fetch outputs");
+                int c = [u[@"color"] intValue]; if (c < 0 || c >= 8) FAIL("fetch output colour out of range");
+                NSString *t = u[@"type"];
+                o->fo_color[o->nfo] = (uint8_t)c;
+                o->fo_kind[o->nfo++] = [t hasPrefix:@"uint"] ? 1 : [t hasPrefix:@"int"] ? 2 : 0;
+            }
         }
         NSArray *tg = j[@"threadgroup_size"];
         if ([tg isKindOfClass:[NSArray class]] && tg.count == 3) for (int i = 0; i < 3; i++) o->tg[i] = (uint16_t)[tg[i] intValue];

@@ -417,6 +417,10 @@ check_t_int_float_view: RUN_ENV = MTL_DEBUG_LAYER=1
 check_t_pfv: RUN_ENV = MTL_DEBUG_LAYER=1
 t_integer_blend: t_integer_blend.m $(MTL_T_DEP)
 	clang $(CFLAGS) -fobjc-arc -o $@ t_integer_blend.m $(MTL_T_SRC) $(FW)
+t_output_types: t_output_types.m
+	clang -O1 -g -Wall -fobjc-arc -o $@ $< -framework Metal -framework Foundation
+check_t_output_types: t_output_types
+	@set -e; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; python3 ../../tools/tests/test_dmsh_output_types.py --fixture "$$work"; MTL_DEBUG_LAYER=1 ./t_output_types "$$work/output_types.metallib"
 t_missing_src1: t_missing_src1.m $(MTL_T_DEP)
 	clang $(CFLAGS) -fobjc-arc -o $@ t_missing_src1.m $(MTL_T_SRC) $(FW)
 check_t_integer_blend: RUN_ENV = MTL_DEBUG_LAYER=1

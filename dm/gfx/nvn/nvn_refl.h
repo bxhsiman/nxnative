@@ -68,7 +68,7 @@ typedef struct {
     uint32_t omap; uint8_t omap_known;
     // Merge B step 2 (readable-tile version <key>_bf, dmsh_fetch.py): fragment - nfc redirectable samples (the i-th: texture slot fc_reg, interpolated output fc_locn),
     // bitmap fc_mixed of texture slots with mixed use (these slots must not be redirected to read the tile), nfo outputs (each with color number fo_color); vertex - .xy of interpolated output locn is taken as-is from attribute uv_attr[locn] (-1 = no)
-    uint8_t nfc, fc_reg[32], fc_locn[32], nfo, fo_color[4]; uint64_t fc_mixed[4]; int8_t uv_attr[32];   // fc_mixed: a bit per texture slot 0-255 (slots 128+ are separate texture binds, NVN_SEPTEX_SLOT0)
+    uint8_t nfc, fc_reg[32], fc_locn[32], nfo, fo_color[4], fo_kind[4]; uint64_t fc_mixed[4]; int8_t uv_attr[32];   // fo_kind: float/normalized 0, uint 1, int 2; fc_mixed: a bit per texture slot 0-255
     // Vertex - .x / .y of interpolated output locn = fma(.x / .y of attribute uv_aff_attr[locn], scale, offset), where scale / offset reference a uniform: (slot << 16) | (vector 0..4095 << 2) | component
     int8_t uv_aff_attr[32]; uint32_t uv_aff[32][4];   // [sx, ox, sy, oy]
     // Projective samples (dmsh_fetch.py 'proj'): fragment - bit i: the i-th redirectable sample reads at in.m_X.xy / in.m_X.w (X = fc_locn[i]); vertex - bit K: interpolated output K is the
@@ -79,6 +79,13 @@ typedef struct {
     uint32_t fc_fpos; uint32_t fc_scale[32][2];
     uint8_t *c1;             // c1 constant segment as-is (B): c1_len bytes, malloc'd by nvn_refl_from_json (NULL without one). It was a 4 KB array; Hyrule Warriors: Age of Calamity has 6 KB segments (its soldiers' vertex shaders)
 } nvn_refl;
+
+// Readable-tile outputs have fixed Metal types. lmap maps physical attachments to shader colours; -1 means an attachment is absent. An incompatible specialization uses the ordinary snapshot path.
+static inline int nvn_fetch_outputs_match(const nvn_refl *r, const int8_t kinds[8], const uint8_t lmap[8]) {
+    for (int q = 0; q < 8; q++) if (kinds[q] >= 0 && lmap[q] != 0xff)
+        for (int j = 0; j < r->nfo; j++) if (lmap[q] == r->fo_color[j] && kinds[q] != r->fo_kind[j]) return 0;
+    return 1;
+}
 
 #ifdef __OBJC__
 #import <Foundation/Foundation.h>
